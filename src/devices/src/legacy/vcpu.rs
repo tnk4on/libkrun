@@ -5,8 +5,9 @@ use std::sync::Mutex;
 use arch::aarch64::layout::VTIMER_IRQ;
 use arch::aarch64::sysreg::*;
 use hvf::bindings::{
-    hv_sys_reg_t_HV_SYS_REG_CNTHCTL_EL2, hv_sys_reg_t_HV_SYS_REG_MDCCINT_EL1, hv_vcpu_get_sys_reg,
-    hv_vcpu_set_sys_reg, HV_SUCCESS,
+    hv_sys_reg_t_HV_SYS_REG_CNTHCTL_EL2, hv_sys_reg_t_HV_SYS_REG_MDCCINT_EL1,
+    hv_sys_reg_t_HV_SYS_REG_ACTLR_EL1,
+    hv_vcpu_get_sys_reg, hv_vcpu_set_sys_reg, HV_SUCCESS,
 };
 use hvf::{vcpu_request_exit, Vcpus};
 
@@ -193,6 +194,21 @@ impl Vcpus for VcpuList {
                     None
                 }
             }
+            SYSREG_ACTLR_EL1 => {
+                let val: u64 = 0;
+                let ret = unsafe {
+                    hv_vcpu_get_sys_reg(
+                        vcpuid,
+                        hv_sys_reg_t_HV_SYS_REG_ACTLR_EL1,
+                        &val as *const _ as *mut _,
+                    )
+                };
+                if ret == HV_SUCCESS {
+                    Some(val)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -246,6 +262,18 @@ impl Vcpus for VcpuList {
             SYSREG_MDCCINT_EL1 => {
                 let ret = unsafe {
                     hv_vcpu_set_sys_reg(vcpuid, hv_sys_reg_t_HV_SYS_REG_MDCCINT_EL1, val)
+                };
+                ret == HV_SUCCESS
+            }
+            SYSREG_ACTLR_EL1 => {
+                // Allow only TSO bit (bit 1) on Apple Silicon.
+                // ACTLR_APPLE_TSO = BIT(1) per AsahiLinux/linux apple_cpufeature.h
+                // Masks all other IMPLEMENTATION DEFINED bits for safety,
+                // preserving the security intent of HCR_TACR trapping.
+                let tso_only = val & 0x2;
+                debug!("ACTLR_EL1 write: val=0x{:x}, tso_only=0x{:x}", val, tso_only);
+                let ret = unsafe {
+                    hv_vcpu_set_sys_reg(vcpuid, hv_sys_reg_t_HV_SYS_REG_ACTLR_EL1, tso_only)
                 };
                 ret == HV_SUCCESS
             }
