@@ -70,6 +70,11 @@ arm64_sys_reg!(SYSREG_CNTHV_CVAL_EL2, 3, 4, 2, 14, 3);
 
 arm64_sys_reg!(SYSREG_LORC_EL1, 3, 0, 3, 10, 4);
 
+// ACTLR_EL1: Auxiliary Control Register (IMPDEF)
+// Apple Silicon uses bit 0 to enable TSO (Total Store Ordering) memory model.
+// Trapped by HCR_TACR so the VMM can control which bits the guest may set.
+arm64_sys_reg!(SYSREG_ACTLR_EL1, 3, 0, 1, 1, 0);
+
 // ICC_CTLR_EL1 (https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/ICC-CTLR-EL1--Interrupt-Controller-Control-Register--EL1-)
 pub const ICC_CTLR_EL1_RSS_SHIFT: u32 = 18;
 pub const ICC_CTLR_EL1_A3V_SHIFT: u32 = 15;
@@ -113,6 +118,7 @@ pub fn sys_reg_name(addr: u32) -> Option<&'static str> {
         SYSREG_CNTHV_CVAL_EL2 => Some("SYSREG_CNTHV_CVAL_EL2"),
 
         SYSREG_LORC_EL1 => Some("SYSREG_LORC_EL1"),
+        SYSREG_ACTLR_EL1 => Some("SYSREG_ACTLR_EL1"),
         _ => None,
     }
 }
