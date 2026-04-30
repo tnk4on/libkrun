@@ -23,6 +23,8 @@ pub mod device;
 pub mod file_traits;
 #[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
 pub mod fs;
+#[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
+pub mod vhost_user_fs;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 #[cfg(feature = "input")]
