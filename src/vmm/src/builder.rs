@@ -1886,40 +1886,67 @@ fn attach_fs_devices(
     use self::StartMicrovmError::*;
 
     for (i, config) in fs_devs.iter().enumerate() {
-        let fs = Arc::new(Mutex::new(
-            devices::virtio::Fs::new(
-                config.fs_id.clone(),
-                config.shared_dir.clone(),
-                exit_code.clone(),
-                config.allow_root_dir_delete,
-                config.read_only,
-            )
-            .unwrap(),
-        ));
+        if let Some(socket_path) = &config.socket_path {
+            // External virtiofsd via vhost-user socket
+            let vhost_fs = Arc::new(Mutex::new(
+                devices::virtio::vhost_user_fs::VhostUserFs::new(
+                    config.fs_id.clone(),
+                    socket_path.clone(),
+                    exit_code.clone(),
+                )
+                .unwrap(),
+            ));
 
-        let id = format!("{}{}", String::from(fs.lock().unwrap().id()), i);
+            let id = format!("vhost-user-fs{}", i);
 
-        if let Some(shm_region) = shm_manager.fs_region(i) {
-            fs.lock().unwrap().set_shm_region(VirtioShmRegion {
-                host_addr: vmm
-                    .guest_memory
-                    .get_host_address(shm_region.guest_addr)
-                    .map_err(StartMicrovmError::ShmHostAddr)? as u64,
-                guest_addr: shm_region.guest_addr.raw_value(),
-                size: shm_region.size,
-            });
+            if let Some(shm_region) = shm_manager.fs_region(i) {
+                vhost_fs.lock().unwrap().set_shm_region(VirtioShmRegion {
+                    host_addr: vmm
+                        .guest_memory
+                        .get_host_address(shm_region.guest_addr)
+                        .map_err(StartMicrovmError::ShmHostAddr)? as u64,
+                    guest_addr: shm_region.guest_addr.raw_value(),
+                    size: shm_region.size,
+                });
+            }
+
+            attach_mmio_device(vmm, id, intc.clone(), vhost_fs).map_err(RegisterFsDevice)?;
+        } else {
+            // Built-in PassthroughFs
+            let fs = Arc::new(Mutex::new(
+                devices::virtio::Fs::new(
+                    config.fs_id.clone(),
+                    config.shared_dir.clone(),
+                    exit_code.clone(),
+                    config.allow_root_dir_delete,
+                    config.read_only,
+                )
+                .unwrap(),
+            ));
+
+            let id = format!("{}{}", String::from(fs.lock().unwrap().id()), i);
+
+            if let Some(shm_region) = shm_manager.fs_region(i) {
+                fs.lock().unwrap().set_shm_region(VirtioShmRegion {
+                    host_addr: vmm
+                        .guest_memory
+                        .get_host_address(shm_region.guest_addr)
+                        .map_err(StartMicrovmError::ShmHostAddr)? as u64,
+                    guest_addr: shm_region.guest_addr.raw_value(),
+                    size: shm_region.size,
+                });
+            }
+
+            #[cfg(not(feature = "tee"))]
+            if let Some(export_table) = export_table.as_ref() {
+                fs.lock().unwrap().set_export_table(export_table.clone());
+            }
+
+            #[cfg(target_os = "macos")]
+            fs.lock().unwrap().set_map_sender(map_sender.clone());
+
+            attach_mmio_device(vmm, id, intc.clone(), fs).map_err(RegisterFsDevice)?;
         }
-
-        #[cfg(not(feature = "tee"))]
-        if let Some(export_table) = export_table.as_ref() {
-            fs.lock().unwrap().set_export_table(export_table.clone());
-        }
-
-        #[cfg(target_os = "macos")]
-        fs.lock().unwrap().set_map_sender(map_sender.clone());
-
-        // The device mutex mustn't be locked here otherwise it will deadlock.
-        attach_mmio_device(vmm, id, intc.clone(), fs).map_err(RegisterFsDevice)?;
     }
 
     Ok(())

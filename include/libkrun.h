@@ -352,6 +352,26 @@ int32_t krun_add_virtiofs3(uint32_t ctx_id,
                            uint64_t shm_size,
                            bool read_only);
 
+/**
+ * Adds a virtio-fs device backed by an external virtiofsd via vhost-user socket.
+ *
+ * Instead of serving the filesystem in-process, connects to an external
+ * virtiofsd daemon via Unix socket for zero-copy filesystem sharing.
+ *
+ * Arguments:
+ *  "ctx_id"         - the configuration context ID.
+ *  "c_tag"          - tag to identify the filesystem in the guest.
+ *  "c_socket_path"  - path to the virtiofsd Unix socket.
+ *  "shm_size"       - size of the DAX SHM window in bytes (0 to disable).
+ *
+ * Returns:
+ *  Zero on success or a negative error number on failure.
+ */
+int32_t krun_add_virtiofs_socket(uint32_t ctx_id,
+                                  const char *c_tag,
+                                  const char *c_socket_path,
+                                  uint64_t shm_size);
+
 /* Send the VFKIT magic after establishing the connection,
    as required by gvproxy in vfkit mode. */
 #define NET_FLAG_VFKIT (1 << 0)

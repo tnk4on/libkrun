@@ -13,10 +13,7 @@ use std::sync::Arc;
 
 use utils::eventfd::{EventFd, EFD_NONBLOCK};
 use virtio_bindings::{virtio_config::VIRTIO_F_VERSION_1, virtio_ring::VIRTIO_RING_F_EVENT_IDX};
-use vm_memory::{ByteValued, GuestMemory, GuestMemoryMmap};
-
-use crate::virtio::fs::defs;
-use crate::virtio::fs::defs::uapi;
+use vm_memory::{Address, ByteValued, GuestMemory, GuestMemoryMmap, GuestMemoryRegion};
 use crate::virtio::{
     ActivateError, ActivateResult, DeviceQueue, DeviceState, QueueConfig, VirtioDevice,
     VirtioShmRegion,
@@ -24,6 +21,14 @@ use crate::virtio::{
 use crate::virtio::InterruptTransport;
 
 use super::protocol::{VhostUserFrontend, VhostUserMemoryRegion, VhostUserVringAddr};
+
+/// VirtIO device type for filesystem (virtio spec)
+const VIRTIO_ID_FS: u32 = 26;
+
+/// Queue configuration: 2 queues (HPQ + REQ), 1024 entries each
+const QUEUE_SIZE: u16 = 1024;
+const NUM_QUEUES: usize = 2;
+const QUEUE_CONFIG: [QueueConfig; NUM_QUEUES] = [QueueConfig::new(QUEUE_SIZE); NUM_QUEUES];
 
 #[derive(Copy, Clone)]
 #[repr(C, packed)]
@@ -104,7 +109,7 @@ impl VirtioDevice for VhostUserFs {
     }
 
     fn device_type(&self) -> u32 {
-        uapi::VIRTIO_ID_FS
+        VIRTIO_ID_FS
     }
 
     fn device_name(&self) -> &str {
@@ -112,7 +117,7 @@ impl VirtioDevice for VhostUserFs {
     }
 
     fn queue_config(&self) -> &[QueueConfig] {
-        &defs::QUEUE_CONFIG
+        &QUEUE_CONFIG
     }
 
     fn read_config(&self, offset: u64, mut data: &mut [u8]) {
@@ -165,24 +170,25 @@ impl VirtioDevice for VhostUserFs {
         })?;
 
         // Share guest memory with virtiofsd
+        // Note: SET_MEM_TABLE requires passing file descriptors for each memory
+        // region so virtiofsd can mmap them. On macOS/HVF, guest memory is
+        // allocated via mmap but the fd management is platform-specific.
+        // This is a WIP — using placeholder fds.
         let mut regions = Vec::new();
         let mut fds = Vec::new();
-        mem.iter().for_each(|region| {
+        for region in mem.iter() {
+            let host_addr = mem
+                .get_host_address(region.start_addr())
+                .unwrap_or(std::ptr::null_mut()) as u64;
             regions.push(VhostUserMemoryRegion {
                 guest_phys_addr: region.start_addr().raw_value(),
                 memory_size: region.len(),
-                user_addr: region.as_ptr() as u64,
+                user_addr: host_addr,
                 mmap_offset: 0,
             });
-            // virtiofsd needs the fd to mmap the region
-            // On macOS with HVF, guest memory is allocated via mmap,
-            // so we can share it via /dev/zero fd as placeholder.
-            // A real implementation would pass the actual memfd.
             fds.push(-1i32); // placeholder — needs real memfd
-        });
-        // Note: SET_MEM_TABLE with actual memory fds is complex and
-        // platform-specific. This is a WIP placeholder.
-        if let Err(e) = frontend.set_mem_table(&regions, &fds.iter().map(|f| *f).collect::<Vec<_>>()) {
+        }
+        if let Err(e) = frontend.set_mem_table(&regions, &fds) {
             warn!("vhost-user-fs: set_mem_table failed: {} (expected for WIP)", e);
         }
 
@@ -190,7 +196,7 @@ impl VirtioDevice for VhostUserFs {
         for (i, dq) in queues.iter().enumerate() {
             let queue = &dq.queue;
 
-            frontend.set_vring_num(i as u32, queue.size).map_err(|e| {
+            frontend.set_vring_num(i as u32, queue.size as u32).map_err(|e| {
                 error!("vhost-user-fs: set_vring_num failed: {}", e);
                 ActivateError::BadActivate
             })?;

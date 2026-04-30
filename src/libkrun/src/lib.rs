@@ -596,6 +596,7 @@ pub unsafe extern "C" fn krun_set_root(ctx_id: u32, c_root_path: *const c_char) 
                 shm_size: Some(1 << 29),
                 allow_root_dir_delete: false,
                 read_only: false,
+                socket_path: None,
             });
         }
         Entry::Vacant(_) => return -libc::ENOENT,
@@ -668,6 +669,66 @@ pub unsafe extern "C" fn krun_add_virtiofs3(
                 shm_size: shm,
                 allow_root_dir_delete: false,
                 read_only,
+                socket_path: None,
+            });
+        }
+        Entry::Vacant(_) => return -libc::ENOENT,
+    }
+
+    KRUN_SUCCESS
+}
+
+/// Add a virtio-fs device backed by an external virtiofsd via vhost-user socket.
+///
+/// Instead of serving the filesystem in-process, connects to an external
+/// virtiofsd daemon via Unix socket for zero-copy filesystem sharing.
+///
+/// # Arguments
+/// * `ctx_id` - configuration context ID
+/// * `c_tag` - tag to identify the filesystem in the guest
+/// * `c_socket_path` - path to the virtiofsd Unix socket
+/// * `shm_size` - size of the DAX SHM window in bytes (0 to disable)
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+#[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
+pub unsafe extern "C" fn krun_add_virtiofs_socket(
+    ctx_id: u32,
+    c_tag: *const c_char,
+    c_socket_path: *const c_char,
+    shm_size: u64,
+) -> i32 {
+    if c_tag.is_null() || c_socket_path.is_null() {
+        return -libc::EINVAL;
+    }
+
+    let tag = match CStr::from_ptr(c_tag).to_str() {
+        Ok(tag) => tag,
+        Err(_) => return -libc::EINVAL,
+    };
+    let socket_path = match CStr::from_ptr(c_socket_path).to_str() {
+        Ok(path) => path,
+        Err(_) => return -libc::EINVAL,
+    };
+
+    let shm = if shm_size > 0 {
+        match shm_size.try_into() {
+            Ok(s) => Some(s),
+            Err(_) => return -libc::EINVAL,
+        }
+    } else {
+        None
+    };
+
+    match CTX_MAP.lock().unwrap().entry(ctx_id) {
+        Entry::Occupied(mut ctx_cfg) => {
+            let cfg = ctx_cfg.get_mut();
+            cfg.vmr.add_fs_device(FsDeviceConfig {
+                fs_id: tag.to_string(),
+                shared_dir: String::new(),
+                shm_size: shm,
+                allow_root_dir_delete: false,
+                read_only: false,
+                socket_path: Some(socket_path.to_string()),
             });
         }
         Entry::Vacant(_) => return -libc::ENOENT,
@@ -2327,6 +2388,7 @@ pub unsafe extern "C" fn krun_set_root_disk_remount(
                 shm_size: Some(1 << 29),
                 allow_root_dir_delete: true,
                 read_only: false,
+                socket_path: None,
             });
 
             ctx_cfg.set_block_root(device, fstype, options);
