@@ -8,6 +8,13 @@
 //! The vhost-user protocol implementation is self-contained (no vhost crate
 //! dependency) to support macOS where eventfd is not available.
 
+mod device;
 mod protocol;
 
+pub use device::VhostUserFs;
 pub use protocol::VhostUserFrontend;
+
+use std::io;
+
+/// Result type for vhost-user-fs operations.
+pub type Result<T> = std::result::Result<T, io::Error>;
