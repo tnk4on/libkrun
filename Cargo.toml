@@ -15,6 +15,8 @@ members = [
     "src/vmm",
     "src/aws_nitro",
     "src/rutabaga_gfx",
+    "src/proxy-fs-proto",
+    "src/proxy-fsd",
 ]
 exclude = ["examples/gtk_display"]
 resolver = "2"

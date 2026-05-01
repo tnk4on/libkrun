@@ -14,6 +14,7 @@ use utils::eventfd::EventFd;
 use vm_memory::GuestMemoryMmap;
 
 use super::super::{FsError, Queue};
+use super::proxy::ProxyFs;
 use super::defs::{HPQ_INDEX, REQ_INDEX};
 use super::descriptor_utils::{Reader, Writer};
 use super::passthrough::{self, PassthroughFs};
@@ -24,6 +25,7 @@ use crate::virtio::{InterruptTransport, VirtioShmRegion};
 enum FsServer {
     ReadWrite(Server<PassthroughFs>),
     ReadOnly(Server<PassthroughFsRo>),
+    Proxy(Server<ProxyFs>),
 }
 
 impl FsServer {
@@ -45,6 +47,14 @@ impl FsServer {
                 map_sender,
             ),
             FsServer::ReadOnly(s) => s.handle_message(
+                r,
+                w,
+                shm_region,
+                exit_code,
+                #[cfg(target_os = "macos")]
+                map_sender,
+            ),
+            FsServer::Proxy(s) => s.handle_message(
                 r,
                 w,
                 shm_region,
@@ -88,6 +98,34 @@ impl FsWorker {
         } else {
             FsServer::ReadWrite(Server::new(PassthroughFs::new(passthrough_cfg)?))
         };
+        Ok(Self {
+            queues,
+            queue_evts,
+            interrupt,
+            mem,
+            shm_region,
+            server,
+            stop_fd,
+            exit_code,
+            #[cfg(target_os = "macos")]
+            map_sender,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_proxy(
+        queues: Vec<Queue>,
+        queue_evts: Vec<Arc<EventFd>>,
+        interrupt: InterruptTransport,
+        mem: GuestMemoryMmap,
+        shm_region: Option<VirtioShmRegion>,
+        socket_path: &str,
+        stop_fd: EventFd,
+        exit_code: Arc<AtomicI32>,
+        #[cfg(target_os = "macos")] map_sender: Option<Sender<WorkerMessage>>,
+    ) -> Result<Self, io::Error> {
+        let fs = ProxyFs::new_listen(socket_path)?;
+        let server = FsServer::Proxy(Server::new(fs));
         Ok(Self {
             queues,
             queue_evts,

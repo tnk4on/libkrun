@@ -657,6 +657,7 @@ dependencies = [
  "lru",
  "nix 0.30.1",
  "pipewire",
+ "proxy-fs-proto",
  "rand",
  "thiserror 2.0.18",
  "virtio-bindings",
@@ -1146,6 +1147,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "proxy-fs-proto"
+version = "0.1.0"
+
+[[package]]
+name = "proxy-fsd"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "proxy-fs-proto",
+ "vsock",
 ]
 
 [[package]]

@@ -6,7 +6,7 @@ pub struct FsDeviceConfig {
     pub allow_root_dir_delete: bool,
     pub read_only: bool,
     /// Path to external virtiofsd Unix socket (vhost-user mode).
-    /// When set, delegates FUSE processing to external virtiofsd
-    /// instead of using built-in PassthroughFs.
     pub socket_path: Option<String>,
+    /// When true, use ProxyFs (on-demand fetch via socket) instead of VhostUserFs.
+    pub proxy_mode: bool,
 }

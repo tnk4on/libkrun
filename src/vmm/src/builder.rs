@@ -724,14 +724,16 @@ pub fn build_microvm(
 
     let mut serial_devices = Vec::new();
 
-    // Create the legacy serial device if we're booting from a firmware
-    if vm_resources.firmware_config.is_some() && !vm_resources.disable_implicit_console {
+    // Create the legacy serial device for firmware boot or direct kernel boot
+    if !vm_resources.disable_implicit_console {
         serial_devices.push(setup_serial_device(
             event_manager,
             None,
-            None,
-            // Uncomment this to get EFI output when debugging EDK2.
-            //Some(Box::new(io::stdout())),
+            if vm_resources.external_kernel.is_some() {
+                Some(Box::new(io::stdout()))
+            } else {
+                None
+            },
         )?);
     };
 
@@ -1175,6 +1177,26 @@ fn load_external_kernel(
                 GuestAddress(0x8000_0000)
             } else {
                 return Err(StartMicrovmError::PeGzInvalid);
+            }
+        }
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        KernelFormat::ImageZstd => {
+            let data: Vec<u8> = std::fs::read(external_kernel.path.clone())
+                .map_err(StartMicrovmError::ImageZstdOpenKernel)?;
+            if let Some(magic) = data
+                .windows(4)
+                .position(|window| window == [0x28, 0xb5, 0x2f, 0xfd])
+            {
+                debug!("Found ZSTD header on PE file at: 0x{magic:x}");
+                let (_, zstd_data) = data.split_at(magic);
+                let mut kernel_data: Vec<u8> = Vec::new();
+                let _ = zstd::stream::copy_decode(zstd_data, &mut kernel_data);
+                guest_mem
+                    .write(&kernel_data, GuestAddress(0x8000_0000))
+                    .unwrap();
+                GuestAddress(0x8000_0000)
+            } else {
+                return Err(StartMicrovmError::ImageZstdInvalid);
             }
         }
         #[cfg(target_arch = "x86_64")]
@@ -1886,7 +1908,25 @@ fn attach_fs_devices(
     use self::StartMicrovmError::*;
 
     for (i, config) in fs_devs.iter().enumerate() {
-        if let Some(socket_path) = &config.socket_path {
+        if config.proxy_mode {
+            let socket_path = config.socket_path.as_ref()
+                .expect("proxy_mode requires socket_path");
+            let fs = Arc::new(Mutex::new(
+                devices::virtio::Fs::new_proxy(
+                    config.fs_id.clone(),
+                    socket_path.clone(),
+                    exit_code.clone(),
+                )
+                .unwrap(),
+            ));
+
+            let id = format!("{}{}", String::from(fs.lock().unwrap().id()), i);
+
+            #[cfg(target_os = "macos")]
+            fs.lock().unwrap().set_map_sender(map_sender.clone());
+
+            attach_mmio_device(vmm, id, intc.clone(), fs).map_err(RegisterFsDevice)?;
+        } else if let Some(socket_path) = &config.socket_path {
             // External virtiofsd via vhost-user socket
             let vhost_fs = Arc::new(Mutex::new(
                 devices::virtio::vhost_user_fs::VhostUserFs::new(

@@ -1,0 +1,8 @@
+[package]
+name = "proxy-fs-proto"
+version = "0.1.0"
+edition = "2021"
+description = "Wire protocol for proxy-fs: a lightweight file serving protocol over vsock/unix socket"
+license = "Apache-2.0"
+
+[dependencies]

@@ -372,6 +372,24 @@ int32_t krun_add_virtiofs_socket(uint32_t ctx_id,
                                   const char *c_socket_path,
                                   uint64_t shm_size);
 
+/**
+ * Add a virtio-fs device using ProxyFs mode.
+ *
+ * Fetches files on-demand from a remote proxy-fsd server via Unix socket
+ * (typically relayed through vsock).
+ *
+ * Arguments:
+ *  "ctx_id"         - the configuration context ID.
+ *  "c_tag"          - tag to identify the filesystem in the guest.
+ *  "c_socket_path"  - path to the proxy-fsd Unix socket (vsock relay).
+ *
+ * Returns:
+ *  Zero on success or a negative error number on failure.
+ */
+int32_t krun_add_virtiofs_proxy(uint32_t ctx_id,
+                                 const char *c_tag,
+                                 const char *c_socket_path);
+
 /* Send the VFKIT magic after establishing the connection,
    as required by gvproxy in vfkit mode. */
 #define NET_FLAG_VFKIT (1 << 0)

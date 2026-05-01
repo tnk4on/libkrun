@@ -53,6 +53,7 @@ pub struct Fs {
     exit_code: Arc<AtomicI32>,
     #[cfg(target_os = "macos")]
     map_sender: Option<Sender<WorkerMessage>>,
+    proxy_socket: Option<String>,
 }
 
 impl Fs {
@@ -89,6 +90,41 @@ impl Fs {
             exit_code,
             #[cfg(target_os = "macos")]
             map_sender: None,
+            proxy_socket: None,
+        })
+    }
+
+    pub fn new_proxy(
+        fs_id: String,
+        socket_path: String,
+        exit_code: Arc<AtomicI32>,
+    ) -> super::Result<Fs> {
+        let avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_RING_F_EVENT_IDX);
+
+        let tag = fs_id.into_bytes();
+        let mut config = VirtioFsConfig::default();
+        config.tag[..tag.len()].copy_from_slice(tag.as_slice());
+        config.num_request_queues = 1;
+
+        let fs_cfg = passthrough::Config {
+            root_dir: String::new(),
+            ..Default::default()
+        };
+
+        Ok(Fs {
+            avail_features,
+            acked_features: 0,
+            device_state: DeviceState::Inactive,
+            config,
+            shm_region: None,
+            passthrough_cfg: fs_cfg,
+            read_only: true,
+            worker_thread: None,
+            worker_stopfd: EventFd::new(EFD_NONBLOCK).map_err(FsError::EventFd)?,
+            exit_code,
+            #[cfg(target_os = "macos")]
+            map_sender: None,
+            proxy_socket: Some(socket_path),
         })
     }
 
@@ -180,19 +216,34 @@ impl VirtioDevice for Fs {
             queue_evts.push(dq.event);
         }
 
-        let worker = FsWorker::new(
-            worker_queues,
-            queue_evts,
-            interrupt.clone(),
-            mem.clone(),
-            self.shm_region.clone(),
-            self.passthrough_cfg.clone(),
-            self.read_only,
-            self.worker_stopfd.try_clone().unwrap(),
-            self.exit_code.clone(),
-            #[cfg(target_os = "macos")]
-            self.map_sender.clone(),
-        )
+        let worker = if let Some(socket_path) = &self.proxy_socket {
+            FsWorker::new_proxy(
+                worker_queues,
+                queue_evts,
+                interrupt.clone(),
+                mem.clone(),
+                self.shm_region.clone(),
+                socket_path,
+                self.worker_stopfd.try_clone().unwrap(),
+                self.exit_code.clone(),
+                #[cfg(target_os = "macos")]
+                self.map_sender.clone(),
+            )
+        } else {
+            FsWorker::new(
+                worker_queues,
+                queue_evts,
+                interrupt.clone(),
+                mem.clone(),
+                self.shm_region.clone(),
+                self.passthrough_cfg.clone(),
+                self.read_only,
+                self.worker_stopfd.try_clone().unwrap(),
+                self.exit_code.clone(),
+                #[cfg(target_os = "macos")]
+                self.map_sender.clone(),
+            )
+        }
         .map_err(|e| {
             error!("virtio_fs: failed to create worker: {}", e);
             ActivateError::BadActivate

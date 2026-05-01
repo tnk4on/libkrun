@@ -597,6 +597,7 @@ pub unsafe extern "C" fn krun_set_root(ctx_id: u32, c_root_path: *const c_char) 
                 allow_root_dir_delete: false,
                 read_only: false,
                 socket_path: None,
+                proxy_mode: false,
             });
         }
         Entry::Vacant(_) => return -libc::ENOENT,
@@ -670,6 +671,7 @@ pub unsafe extern "C" fn krun_add_virtiofs3(
                 allow_root_dir_delete: false,
                 read_only,
                 socket_path: None,
+                proxy_mode: false,
             });
         }
         Entry::Vacant(_) => return -libc::ENOENT,
@@ -729,6 +731,56 @@ pub unsafe extern "C" fn krun_add_virtiofs_socket(
                 allow_root_dir_delete: false,
                 read_only: false,
                 socket_path: Some(socket_path.to_string()),
+                proxy_mode: false,
+            });
+        }
+        Entry::Vacant(_) => return -libc::ENOENT,
+    }
+
+    KRUN_SUCCESS
+}
+
+/// Add a virtio-fs device using ProxyFs mode.
+///
+/// Fetches files on-demand from a remote proxy-fsd server via Unix socket
+/// (typically relayed through vsock).
+///
+/// # Arguments
+/// * `ctx_id` - configuration context ID
+/// * `c_tag` - tag to identify the filesystem in the guest
+/// * `c_socket_path` - path to the proxy-fsd Unix socket (vsock relay)
+#[allow(clippy::missing_safety_doc)]
+#[no_mangle]
+#[cfg(not(any(feature = "tee", feature = "aws-nitro")))]
+pub unsafe extern "C" fn krun_add_virtiofs_proxy(
+    ctx_id: u32,
+    c_tag: *const c_char,
+    c_socket_path: *const c_char,
+) -> i32 {
+    if c_tag.is_null() || c_socket_path.is_null() {
+        return -libc::EINVAL;
+    }
+
+    let tag = match CStr::from_ptr(c_tag).to_str() {
+        Ok(tag) => tag,
+        Err(_) => return -libc::EINVAL,
+    };
+    let socket_path = match CStr::from_ptr(c_socket_path).to_str() {
+        Ok(path) => path,
+        Err(_) => return -libc::EINVAL,
+    };
+
+    match CTX_MAP.lock().unwrap().entry(ctx_id) {
+        Entry::Occupied(mut ctx_cfg) => {
+            let cfg = ctx_cfg.get_mut();
+            cfg.vmr.add_fs_device(FsDeviceConfig {
+                fs_id: tag.to_string(),
+                shared_dir: String::new(),
+                shm_size: None,
+                allow_root_dir_delete: false,
+                read_only: true,
+                socket_path: Some(socket_path.to_string()),
+                proxy_mode: true,
             });
         }
         Entry::Vacant(_) => return -libc::ENOENT,
@@ -2389,6 +2441,7 @@ pub unsafe extern "C" fn krun_set_root_disk_remount(
                 allow_root_dir_delete: true,
                 read_only: false,
                 socket_path: None,
+                proxy_mode: false,
             });
 
             ctx_cfg.set_block_root(device, fstype, options);

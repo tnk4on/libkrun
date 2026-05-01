@@ -1,3 +1,4 @@
+pub mod proxy;
 mod device;
 #[allow(dead_code)]
 mod filesystem;

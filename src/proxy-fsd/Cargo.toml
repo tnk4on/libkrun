@@ -1,0 +1,17 @@
+[package]
+name = "proxy-fsd"
+version = "0.1.0"
+edition = "2021"
+description = "File server for ProxyFs: serves container rootfs over vsock/unix socket"
+license = "Apache-2.0"
+
+[[bin]]
+name = "proxy-fsd"
+path = "src/main.rs"
+
+[dependencies]
+proxy-fs-proto = { path = "../proxy-fs-proto" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+vsock = "0.5"
